@@ -150,13 +150,16 @@ def draw_group_top_symbol(ax, x, y, text='R1', scale=1.0, input_connected='N'):
     diag_offset = -0.05 * scale
     left_adjust = -0.04 * scale
     right_adjust = 0.04 * scale
+    down_shift = - 0.01 * scale  # / Adjust this value to control how far down the line goes
+
     ax.plot([x - diagonal_length/2, x + diagonal_length/2],
-            [base_y + line_extension - y_shift + left_adjust + diag_offset,
-             base_y + line_extension - diagonal_length - y_shift + right_adjust + diag_offset],
+            [base_y + line_extension - y_shift + left_adjust + diag_offset + down_shift,
+            base_y + line_extension - diagonal_length - y_shift + right_adjust + diag_offset + down_shift],
             color='black', linewidth=1.2)
+
     text_offset = -0.1 * scale
     ax.text(x, base_y + line_extension + 0.1 - y_shift + text_offset,
-            str(text), ha='center', va='bottom', fontsize=8, fontweight='bold')
+            str(text), ha='center', va='bottom', fontsize=17, fontweight='bold')
 
 # === Draw relay symbol at bottom of vertical line ===
 def draw_group_bottom_symbol(ax, x, y, text='R1', scale=1.0, output_connected='N'):
@@ -169,13 +172,15 @@ def draw_group_bottom_symbol(ax, x, y, text='R1', scale=1.0, output_connected='N
     diag_offset = 0.05 * scale
     left_adjust = 0.04 * scale
     right_adjust = -0.04 * scale
-    left_y = base_y - line_extension - diagonal_length + y_shift + left_adjust + diag_offset
-    right_y = base_y - line_extension + y_shift + right_adjust + diag_offset
+    diagonal_down_shift = 0.02 * scale  # Adjust this value to control how far down the line goes
+    left_y = base_y - line_extension - diagonal_length + y_shift + left_adjust + diag_offset - diagonal_down_shift
+    right_y = base_y - line_extension + y_shift + right_adjust + diag_offset - diagonal_down_shift
+
     ax.plot([x - diagonal_length/2, x + diagonal_length/2],
             [left_y, right_y],
             color='black', linewidth=1.2)
     text_offset = 0.2 * scale
-    text_y = base_y - line_extension - diagonal_length - 0.1 + y_shift + text_offset
+    text_y = base_y - line_extension - diagonal_length - 0.1 + y_shift + text_offset -0.05
     ax.text(x, text_y, str(text), ha='center', va='top', fontsize=17, fontweight='bold')
 
 # === Load Excel ===
@@ -346,7 +351,7 @@ def draw_s_fuse(ax, x, y_center, terminal_name):
         term_str = str(terminal_name)
         if term_str.endswith('.0'):
             term_str = term_str[:-2]
-        ax.text(x - 0.3, y_center + 0.1, term_str, ha='center', va='center', fontsize=6.5)
+        ax.text(x - 0.1, y_center + 0.05, term_str, ha='center', va='center', fontsize=13)
 
     # Draw input and output labels
     input_left_offset = 0.005
