@@ -6,6 +6,9 @@ import re
 import os
 from matplotlib.backends.backend_pdf import PdfPages
 import math
+from collections import OrderedDict
+import sys
+import pandas as pd
 
 # === Function to merge ranges ===
 def merge_ranges(ranges, merge_adjacent=True):
@@ -52,7 +55,7 @@ def draw_circuit_name(ax, x, y, circuit_name, x_offset=0.65):
             fontsize=18, fontweight='bold')
 
 # === Function to draw junction box with big text ===
-def draw_junction_box(ax, x, y, junction_name, y_offset=21, rect_pad=0.2):
+def draw_junction_box(ax, x, y, junction_name, rect_pad=0.2):
     text_raw = str(junction_name).strip()
     if not text_raw:
         return
@@ -62,11 +65,11 @@ def draw_junction_box(ax, x, y, junction_name, y_offset=21, rect_pad=0.2):
     font_size = max(20, min(35, 35 - (len(s) - 5) * 0.5))
     rect_width = text_width + rect_pad * 10
     rect_x = x - rect_width / 2
-    rect_y = y - text_height / 2 + y_offset
+    rect_y = y - text_height / 2
     rect = Rectangle((rect_x, rect_y), rect_width, text_height,
                      linewidth=2, edgecolor='black', facecolor='none')
     ax.add_patch(rect)
-    ax.text(x, y + y_offset, s, ha='center', va='center',
+    ax.text(x, y, s, ha='center', va='center',
             fontsize=font_size, fontweight='bold', zorder=5)
 
 # === Relay input symbol ===
@@ -260,18 +263,56 @@ def draw_group_bottom_symbol(ax, x_start, x_end, y, text='R1', scale=1.0, output
     ax.text(x, text_y, display_text, ha='center', va='top',
             fontsize=int(17 * scale), fontweight='bold', linespacing=1.2)
 
+
 # === Load Excel ===
-EXCEL_FILE = r'C:\Diagram\RAILWAYPROJECT.xlsx'  # use raw string to avoid escape issues
-df = pd.read_excel(EXCEL_FILE, sheet_name='terminal')
-df.columns = df.columns.str.strip()
-df_junction = pd.read_excel(EXCEL_FILE, sheet_name='junction_box')
-df_junction.columns = df_junction.columns.str.strip()
-df_header = pd.read_excel(EXCEL_FILE, sheet_name='terminal_header')
-df_header.columns = df_header.columns.str.strip()
-df_group = pd.read_excel(EXCEL_FILE, sheet_name='group')
-df_group.columns = df_group.columns.str.strip()
-df_circuit = pd.read_excel(EXCEL_FILE, sheet_name='circuit')
-df_circuit.columns = df_circuit.columns.str.strip()
+# === Load Excel file path from command line (or prompt) ===
+if len(sys.argv) > 1:
+    EXCEL_FILE = sys.argv[1]
+else:
+    EXCEL_FILE = input("Enter Excel file path (e.g. C:\\Diagram\\RAILWAYPROJECT.xlsx) or press Enter to exit: ").strip()
+    if not EXCEL_FILE:
+        print("No Excel file provided. Exiting.")
+        sys.exit(1)
+
+if not os.path.exists(EXCEL_FILE):
+    print(f"Error: Excel file not found at: {EXCEL_FILE}")
+    sys.exit(1)
+
+# Validate required sheets exist
+try:
+    xls = pd.ExcelFile(EXCEL_FILE)
+except Exception as e:
+    print(f"Unable to open Excel file: {e}")
+    sys.exit(1)
+
+required_sheets = ['terminal', 'junction_box', 'terminal_header', 'group', 'circuit']
+available_sheets = [s.strip() for s in xls.sheet_names]
+missing = [s for s in required_sheets if s not in available_sheets]
+if missing:
+    print(f"Excel file is missing required sheets: {missing}")
+    print(f"Available sheets: {available_sheets}")
+    sys.exit(1)
+
+# === Load Excel sheets ===
+try:
+    df = pd.read_excel(EXCEL_FILE, sheet_name='terminal')
+    df.columns = df.columns.str.strip()
+    df_junction = pd.read_excel(EXCEL_FILE, sheet_name='junction_box')
+    df_junction.columns = df_junction.columns.str.strip()
+    df_header = pd.read_excel(EXCEL_FILE, sheet_name='terminal_header')
+    df_header.columns = df_header.columns.str.strip()
+    df_group = pd.read_excel(EXCEL_FILE, sheet_name='group')
+    df_group.columns = df_group.columns.str.strip()
+    df_circuit = pd.read_excel(EXCEL_FILE, sheet_name='circuit')
+    df_circuit.columns = df_circuit.columns.str.strip()
+except Exception as e:
+    print(f"Error reading required sheets from Excel file: {e}")
+    sys.exit(1)
+finally:
+    try:
+        xls.close()
+    except Exception:
+        pass
 
 if 'spare' in df.columns:
     df.loc[df['spare'].astype(str).str.upper() == 'Y', 'input_left'] = 'SP'
@@ -286,7 +327,6 @@ y_bottom_bus_offset = -1.3
 stub_length = 0.74
 CIRCUIT_GAP = 2.0
 vertical_gap = 6.5
-JUNCTION_BOX_Y_OFFSET = 2.0
 
 # === Header Function ===
 def draw_header(ax, circuit_id, header_type, x_start, x_end, text, min_symbol_bottom=None,
@@ -606,8 +646,12 @@ def draw_bus_lines(ax, x_positions, connected_flags, bus_y, gap=0.12, extra=0.12
                 ax.plot([plot_start, plot_end], [bus_y, bus_y], color='black', linewidth=1)
 
 # === Main Draw Function ===
-def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, pin_spacing=0.8, circuits_per_page=12, page_number=1):
-    circuits_per_row = 3
+def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, pin_spacing=0.8, circuits_per_page=12, page_number=1, circuits_per_row=3, max_rows_visible=4):
+    """
+    Draw symbols for the provided ordered_circuit_ids on ax.
+    max_rows_visible: the maximum number of visible symbol rows per page (default 4).
+    If drawing would start a 5th row, that row is reserved as blank and remaining circuits for the page are not drawn.
+    """
     current_x = start_x
     current_circuit_count = 0
     y_offset = 0
@@ -619,130 +663,138 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
     overall_max_x = start_x
     current_row_max_x = start_x
 
+    # Track which logical row index we are on (0-based)
+    row_index = 0
+    stop_drawing = False
+
     # Use page-specific circuit ids supplied (ordered already per-junction)
     page_circuit_ids = ordered_circuit_ids
 
-    for circuit_id in page_circuit_ids:
-        circuit_rows = df_circuit[df_circuit['circuit_id'] == circuit_id]
-        circuit_pos = circuit_rows['position'].iloc[0] if not circuit_rows.empty and 'position' in circuit_rows.columns else None
-        group = df_symbols[df_symbols['circuit_id'] == circuit_id].sort_index().reset_index(drop=True)
-        circuit_name_row = circuit_rows
-        circuit_name = get_block_circuit_name(circuit_name_row)
+    # Group circuits by circuit letter (preserve order of first appearance)
+    letter_groups = OrderedDict()
+    for cid in page_circuit_ids:
+        r = df_circuit[df_circuit['circuit_id'] == cid]
+        letter = ""
+        if not r.empty and 'circuit_name' in r.columns:
+            cn = str(r['circuit_name'].iloc[0]).strip()
+            m = re.match(r'^([A-Z])', cn)
+            if m:
+                letter = m.group(1)
+            else:
+                # fallback to whole name if no leading uppercase letter
+                letter = cn if cn else ""
+        else:
+            letter = ""
+        if letter not in letter_groups:
+            letter_groups[letter] = []
+        letter_groups[letter].append(cid)
 
-        if current_circuit_count >= circuits_per_row:
+    # Iterate letter groups so each letter starts at a new row
+    for letter, circuit_list in letter_groups.items():
+        if stop_drawing:
+            break
+
+        # If we're mid-row when starting a new letter, force a new row (this leaves blanks at end of prior letter)
+        if current_circuit_count != 0:
+            # about to start a new row
+            # increment row index and check visible limit
+            row_index += 1
             overall_max_x = max(overall_max_x, current_row_max_x)
             current_row_max_x = start_x
-            y_offset -= vertical_gap
             current_x = start_x
             current_circuit_count = 0
+            # Reserve space for new row (visible or blank)
+            y_offset -= vertical_gap
 
-        capsule_y_center = CAPSULE_Y_CENTER_BASE + y_offset
-        y_top_bus_group = capsule_y_center + y_top_bus_offset
-        y_bottom_bus_group = capsule_y_center + y_bottom_bus_offset
+            if row_index >= max_rows_visible:
+                # we've reached the 5th (or beyond) row: reserve the blank row and stop drawing further circuits on this page
+                stop_drawing = True
+                break
 
-        if current_circuit_count == 0:
-            draw_circuit_name(ax, start_x - 1.2, capsule_y_center, circuit_name or f"Circuit {circuit_id}")
+        # set group label to draw at row start (user wants letter at left for each row)
+        group_label = letter if letter else " "
 
-        if group.empty:
-            current_x += pin_spacing + CIRCUIT_GAP
-            current_row_max_x = max(current_row_max_x, current_x)
-            current_circuit_count += 1
-            min_y = min(min_y, capsule_y_center - 2.0)
-            max_y = max(max_y, capsule_y_center + 2.0)
-            continue
+        for circuit_id in circuit_list:
+            if stop_drawing:
+                break
 
-        input_connected_flags = []
-        output_connected_flags = []
-        x_positions = []
-        symbol_bottoms = []
-        terminal_names_for_positions = []
+            circuit_rows = df_circuit[df_circuit['circuit_id'] == circuit_id]
+            circuit_pos = circuit_rows['position'].iloc[0] if not circuit_rows.empty and 'position' in circuit_rows.columns else None
+            group = df_symbols[df_symbols['circuit_id'] == circuit_id].sort_index().reset_index(drop=True)
 
-        i = 0
-        while i < len(group):
-            row = group.iloc[i]
-            symbol = str(row.get('symbol', '')).strip().lower()
-            if symbol == 'capsule':
-                top_conn, bottom_conn, input_conn, output_conn = draw_capsule(
-                    ax, current_x, capsule_y_center,
-                    row.get('terminal_name'),
-                    row.get('input_left'),
-                    row.get('input_right'),
-                    row.get('output_left'),
-                    row.get('output_right'),
-                    row.get('input_connected', 'N'),
-                    row.get('output_connected', 'N')
-                )
-                x_positions.append(current_x)
-                tname = str(row.get('terminal_name')).strip()
-                if tname.endswith('.0'):
-                    tname = tname[:-2]
-                terminal_names_for_positions.append(tname)
-                input_connected_flags.append(str(input_conn).strip().upper() == "Y")
-                output_connected_flags.append(str(output_conn).strip().upper() == "Y")
-                symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
-                current_x += pin_spacing
+            # Determine capsule center for this row
+            capsule_y_center = CAPSULE_Y_CENTER_BASE + y_offset
+            y_top_bus_group = capsule_y_center + y_top_bus_offset
+            y_bottom_bus_group = capsule_y_center + y_bottom_bus_offset
+
+            # If current row is full, move to next row
+            if current_circuit_count >= circuits_per_row:
+                # about to start a new row
+                row_index += 1
+                overall_max_x = max(overall_max_x, current_row_max_x)
+                current_row_max_x = start_x
+                y_offset -= vertical_gap
+                current_x = start_x
+                current_circuit_count = 0
+
+                # update capsule center for the new row
+                capsule_y_center = CAPSULE_Y_CENTER_BASE + y_offset
+                y_top_bus_group = capsule_y_center + y_top_bus_offset
+                y_bottom_bus_group = capsule_y_center + y_bottom_bus_offset
+
+                if row_index >= max_rows_visible:
+                    # Reserve blank row (we've decremented y_offset already), stop drawing
+                    stop_drawing = True
+                    break
+
+            if current_circuit_count == 0 and not stop_drawing:
+                # draw the group letter (A, B, ...) at the beginning of each visible row
+                draw_circuit_name(ax, start_x - 1.2, capsule_y_center, group_label or f"Circuit {circuit_id}")
+
+            if stop_drawing:
+                break
+
+            if group.empty:
+                current_x += pin_spacing + CIRCUIT_GAP
                 current_row_max_x = max(current_row_max_x, current_x)
-                i += 1
-            elif symbol == 'single_fuse':
-                top_conn, bottom_conn, input_conn, output_conn = draw_s_fuse(
-                    ax, current_x, capsule_y_center, row.get('terminal_name')
-                )
-                x_positions.append(current_x)
-                tname = str(row.get('terminal_name')).strip()
-                if tname.endswith('.0'):
-                    tname = tname[:-2]
-                terminal_names_for_positions.append(tname)
-                input_connected_flags.append(str(input_conn).strip().upper() == "Y")
-                output_connected_flags.append(str(output_conn).strip().upper() == "Y")
-                symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
-                current_x += pin_spacing
-                current_row_max_x = max(current_row_max_x, current_x)
-                i += 1
-            elif symbol == 'choke':
-                top_conn, bottom_conn, input_conn, output_conn = draw_choke(
-                    ax, current_x, capsule_y_center, row.get('terminal_name')
-                )
-                x_positions.append(current_x)
-                tname = str(row.get('terminal_name')).strip()
-                if tname.endswith('.0'):
-                    tname = tname[:-2]
-                terminal_names_for_positions.append(tname)
-                input_connected_flags.append(str(input_conn).strip().upper() == "Y")
-                output_connected_flags.append(str(output_conn).strip().upper() == "Y")
-                symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
-                current_x += pin_spacing
-                current_row_max_x = max(current_row_max_x, current_x)
-                i += 1
-            elif symbol == 'dual_fuse':
-                if i + 1 < len(group):
-                    next_row = group.iloc[i+1]
-                    LEFT_EXTRA = pin_spacing * 1.0
-                    AFTER_SPACING = pin_spacing * 1.5
-                    current_x += LEFT_EXTRA
-                    dual_start_x = current_x - SYMBOL_WIDTH * 1.25
-                    top_conn, bottom_conn, left_ic, left_oc, right_ic, right_oc = draw_dual_fuse(
-                        ax, dual_start_x, capsule_y_center,
+                current_circuit_count += 1
+                min_y = min(min_y, capsule_y_center - 2.0)
+                max_y = max(max_y, capsule_y_center + 2.0)
+                continue
+
+            input_connected_flags = []
+            output_connected_flags = []
+            x_positions = []
+            symbol_bottoms = []
+            terminal_names_for_positions = []
+
+            i = 0
+            while i < len(group) and not stop_drawing:
+                row = group.iloc[i]
+                symbol = str(row.get('symbol', '')).strip().lower()
+                if symbol == 'capsule':
+                    top_conn, bottom_conn, input_conn, output_conn = draw_capsule(
+                        ax, current_x, capsule_y_center,
                         row.get('terminal_name'),
-                        next_row.get('terminal_name')
+                        row.get('input_left'),
+                        row.get('input_right'),
+                        row.get('output_left'),
+                        row.get('output_right'),
+                        row.get('input_connected', 'N'),
+                        row.get('output_connected', 'N')
                     )
-                    tname_left = str(row.get('terminal_name')).strip()
-                    tname_right = str(next_row.get('terminal_name')).strip()
-                    if tname_left.endswith('.0'): tname_left = tname_left[:-2]
-                    if tname_right.endswith('.0'): tname_right = tname_right[:-2]
-                    x_positions.append(dual_start_x)
-                    x_positions.append(dual_start_x)
-                    terminal_names_for_positions.append(tname_left)
-                    terminal_names_for_positions.append(tname_right)
-                    input_connected_flags.append(str(left_ic).strip().upper() == "Y")
-                    input_connected_flags.append(str(right_ic).strip().upper() == "Y")
-                    output_connected_flags.append(str(left_oc).strip().upper() == "Y")
-                    output_connected_flags.append(str(right_oc).strip().upper() == "Y")
+                    x_positions.append(current_x)
+                    tname = str(row.get('terminal_name')).strip()
+                    if tname.endswith('.0'):
+                        tname = tname[:-2]
+                    terminal_names_for_positions.append(tname)
+                    input_connected_flags.append(str(input_conn).strip().upper() == "Y")
+                    output_connected_flags.append(str(output_conn).strip().upper() == "Y")
                     symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
-                    symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
-                    current_x += AFTER_SPACING
+                    current_x += pin_spacing
                     current_row_max_x = max(current_row_max_x, current_x)
-                    i += 2
-                else:
+                    i += 1
+                elif symbol == 'single_fuse':
                     top_conn, bottom_conn, input_conn, output_conn = draw_s_fuse(
                         ax, current_x, capsule_y_center, row.get('terminal_name')
                     )
@@ -757,219 +809,288 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
                     current_x += pin_spacing
                     current_row_max_x = max(current_row_max_x, current_x)
                     i += 1
-            else:
-                i += 1
-
-        hook_input_flags = []
-        hook_output_flags = []
-        for j, x in enumerate(x_positions):
-            if j > 0 and x == x_positions[j-1]:
-                continue
-            symbol_top_y = capsule_y_center + SYMBOL_HEIGHT/2 + SYMBOL_RADIUS
-            symbol_bottom_y = capsule_y_center - SYMBOL_HEIGHT/2 - SYMBOL_RADIUS
-            hooked_in = draw_input_connection(ax, x, symbol_top_y, 'Y' if input_connected_flags[j] else 'N', y_top_bus_group)
-            hooked_out = draw_output_connection(ax, x, symbol_bottom_y, 'Y' if output_connected_flags[j] else 'N', y_bottom_bus_group)
-            hook_input_flags.append(hooked_in)
-            hook_output_flags.append(hooked_out)
-
-        top_ranges = []
-        bottom_ranges = []
-        circuit_headers_temp = df_header[df_header['circuit_id'] == circuit_id]
-        for _, hrow_temp in circuit_headers_temp.iterrows():
-            header_type_temp = str(hrow_temp.get('header_type', '')).strip().upper()
-            terminal_start_temp = hrow_temp.get('terminal_start')
-            terminal_end_temp = hrow_temp.get('terminal_end', terminal_start_temp)
-            start_name_temp = str(terminal_start_temp).strip().replace('.0', '') if pd.notna(terminal_start_temp) else None
-            end_name_temp = str(terminal_end_temp).strip().replace('.0', '') if pd.notna(terminal_end_temp) else None
-            if pd.isna(start_name_temp) or pd.isna(end_name_temp) or start_name_temp not in terminal_names_for_positions or end_name_temp not in terminal_names_for_positions:
-                continue
-            start_idx_temp = terminal_names_for_positions.index(start_name_temp)
-            end_idx_temp = terminal_names_for_positions.index(end_name_temp)
-            if start_idx_temp > end_idx_temp:
-                start_idx_temp, end_idx_temp = end_idx_temp, start_idx_temp
-            if header_type_temp == 'WIREFROM':
-                top_ranges.append((start_idx_temp, end_idx_temp))
-            elif header_type_temp == 'WIRETO':
-                bottom_ranges.append((start_idx_temp, end_idx_temp))
-
-        merge_adjacent = True
-        if top_ranges and bottom_ranges:
-            merge_adjacent = False
-
-        top_segments = merge_ranges(top_ranges, merge_adjacent=merge_adjacent)
-        bottom_segments = merge_ranges(bottom_ranges, merge_adjacent=merge_adjacent)
-
-        if not top_segments and any(input_connected_flags):
-            top_segments = [(0, len(x_positions)-1)]
-        if not bottom_segments and any(output_connected_flags):
-            bottom_segments = [(0, len(x_positions)-1)]
-
-        for min_idx, max_idx in top_segments:
-            sub_x = x_positions[min_idx : max_idx + 1]
-            sub_flags = input_connected_flags[min_idx : max_idx + 1]
-            draw_bus_lines(ax, sub_x, sub_flags, y_top_bus_group, gap=0.12)
-            connected_local = [i for i, f in enumerate(sub_flags) if f]
-            if connected_local:
-                first_local = connected_local[0]
-                x_first = sub_x[first_local]
-                ax.plot([x_first - 0.3, x_first], [y_top_bus_group, y_top_bus_group], color='black', linewidth=1)
-                ax.plot([x_first - 0.3, x_first - 0.3], [y_top_bus_group, y_top_bus_group + 0.2], color='black', linewidth=1)
-
-        for min_idx, max_idx in bottom_segments:
-            sub_x = x_positions[min_idx : max_idx + 1]
-            sub_flags = output_connected_flags[min_idx : max_idx + 1]
-            draw_bus_lines(ax, sub_x, sub_flags, y_bottom_bus_group, gap=0.12)
-            connected_local = [i for i, f in enumerate(sub_flags) if f]
-            if connected_local:
-                last_local = connected_local[-1]
-                x_last = sub_x[last_local]
-                ax.plot([x_last, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group], color='black', linewidth=1)
-                ax.plot([x_last + 0.3, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group - 0.2], color='black', linewidth=1)
-
-        circuit_groups = df_group[df_group['circuit_id'] == circuit_id] if 'circuit_id' in df_group.columns else pd.DataFrame()
-        name_to_x = {}
-        name_to_output_connected = {}
-        name_to_input_connected = {}
-        for idx, (xval, tname) in enumerate(zip(x_positions, terminal_names_for_positions)):
-            if tname in name_to_x:
-                continue
-            name_to_x[tname] = xval
-            name_to_output_connected[tname] = output_connected_flags[idx] if idx < len(output_connected_flags) else False
-            name_to_input_connected[tname] = input_connected_flags[idx] if idx < len(input_connected_flags) else False
-
-        x_min = min(x_positions) if x_positions else None
-        x_max = max(x_positions) if x_positions else None
-
-        if not circuit_groups.empty:
-            min_bottom = min(symbol_bottoms) if symbol_bottoms else y_bottom_bus_group
-            x_start_pos = min(x_positions) if x_positions else current_x - pin_spacing
-            x_end_pos = max(x_positions) if x_positions else current_x
-
-            def parse_terminal_no_field(val):
-                if pd.isna(val):
-                    return None, None
-                s = str(val).strip()
-                if ',' in s:
-                    parts = s.split(',')
-                    if len(parts) >= 2:
-                        try:
-                            a = parts[0].strip()
-                            b = parts[1].strip()
-                            return a, b
-                        except ValueError:
-                            pass
-                if '-' in s:
-                    parts = s.split('-')
-                    if len(parts) >= 2:
-                        try:
-                            a = parts[0].strip()
-                            b = parts[1].strip()
-                            return a, b
-                        except ValueError:
-                            pass
-                return s, s
-
-            for _, grow in circuit_groups.iterrows():
-                tn_field = grow.get('terminal_no')
-                start_name, end_name = parse_terminal_no_field(tn_field)
-                x_start_term = name_to_x.get(start_name, x_min)
-                x_end_term = name_to_x.get(end_name, x_max)
-                if x_start_term is None or x_end_term is None:
-                    continue
-                label_text = grow.get('text', '')
-                io_field = str(grow.get('input_output', '')).strip().lower()
-                if io_field == 'input':
-                    y_relay = y_top_bus_group + 0.55
-                    draw_relay_input(ax, x_start_term, x_end_term, y=y_relay, scale=1.0, text=str(label_text))
-                elif io_field == 'output':
-                    y_relay = y_bottom_bus_group - 0.55
-                    draw_relay_output(ax, x_start_term, x_end_term, y=y_relay, scale=1.0, text=str(label_text))
+                elif symbol == 'choke':
+                    top_conn, bottom_conn, input_conn, output_conn = draw_choke(
+                        ax, current_x, capsule_y_center, row.get('terminal_name')
+                    )
+                    x_positions.append(current_x)
+                    tname = str(row.get('terminal_name')).strip()
+                    if tname.endswith('.0'):
+                        tname = tname[:-2]
+                    terminal_names_for_positions.append(tname)
+                    input_connected_flags.append(str(input_conn).strip().upper() == "Y")
+                    output_connected_flags.append(str(output_conn).strip().upper() == "Y")
+                    symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
+                    current_x += pin_spacing
+                    current_row_max_x = max(current_row_max_x, current_x)
+                    i += 1
+                elif symbol == 'dual_fuse':
+                    if i + 1 < len(group):
+                        next_row = group.iloc[i+1]
+                        LEFT_EXTRA = pin_spacing * 1.0
+                        AFTER_SPACING = pin_spacing * 1.5
+                        current_x += LEFT_EXTRA
+                        dual_start_x = current_x - SYMBOL_WIDTH * 1.25
+                        top_conn, bottom_conn, left_ic, left_oc, right_ic, right_oc = draw_dual_fuse(
+                            ax, dual_start_x, capsule_y_center,
+                            row.get('terminal_name'),
+                            next_row.get('terminal_name')
+                        )
+                        tname_left = str(row.get('terminal_name')).strip()
+                        tname_right = str(next_row.get('terminal_name')).strip()
+                        if tname_left.endswith('.0'): tname_left = tname_left[:-2]
+                        if tname_right.endswith('.0'): tname_right = tname_right[:-2]
+                        x_positions.append(dual_start_x)
+                        x_positions.append(dual_start_x)
+                        terminal_names_for_positions.append(tname_left)
+                        terminal_names_for_positions.append(tname_right)
+                        input_connected_flags.append(str(left_ic).strip().upper() == "Y")
+                        input_connected_flags.append(str(right_ic).strip().upper() == "Y")
+                        output_connected_flags.append(str(left_oc).strip().upper() == "Y")
+                        output_connected_flags.append(str(right_oc).strip().upper() == "Y")
+                        symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
+                        symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
+                        current_x += AFTER_SPACING
+                        current_row_max_x = max(current_row_max_x, current_x)
+                        i += 2
+                    else:
+                        top_conn, bottom_conn, input_conn, output_conn = draw_s_fuse(
+                            ax, current_x, capsule_y_center, row.get('terminal_name')
+                        )
+                        x_positions.append(current_x)
+                        tname = str(row.get('terminal_name')).strip()
+                        if tname.endswith('.0'):
+                            tname = tname[:-2]
+                        terminal_names_for_positions.append(tname)
+                        input_connected_flags.append(str(input_conn).strip().upper() == "Y")
+                        output_connected_flags.append(str(output_conn).strip().upper() == "Y")
+                        symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
+                        current_x += pin_spacing
+                        current_row_max_x = max(current_row_max_x, current_x)
+                        i += 1
                 else:
-                    center_x = (x_start_term + x_end_term) / 2.0
-                    ax.text(center_x, y_top_bus_group + 0.2, str(label_text), ha='center', va='bottom', fontsize=8, fontweight='bold')
+                    i += 1
 
-        circuit_headers = df_header[df_header['circuit_id'] == circuit_id]
-        for _, hrow in circuit_headers.iterrows():
-            header_type = str(hrow.get('header_type', '')).strip().upper()
-            terminal_start = hrow.get('terminal_start')
-            terminal_end = hrow.get('terminal_end', terminal_start)
-            input_output = str(hrow.get('input_output', '')).strip().lower()
-            text = hrow.get('text', '')
-            if pd.isna(text) or str(text).strip() == '':
-                text = ''
-            else:
-                text = str(text).strip()
-            start_name = str(terminal_start).strip().replace('.0', '') if pd.notna(terminal_start) else None
-            end_name = str(terminal_end).strip().replace('.0', '') if pd.notna(terminal_end) else None
-            if pd.isna(start_name) or pd.isna(end_name) or start_name not in terminal_names_for_positions or end_name not in terminal_names_for_positions:
-                continue
-            start_idx = terminal_names_for_positions.index(start_name)
-            end_idx = terminal_names_for_positions.index(end_name)
-            if start_idx > end_idx:
-                start_idx, end_idx = end_idx, start_idx
-            x_left = x_positions[start_idx]
-            x_right = x_positions[end_idx]
+            # If we reserved a blank 5th row mid-way, skip the rest
+            if stop_drawing:
+                break
 
-            if header_type == 'RELAY':
-                if input_output == 'input':
-                    symbol_top_y = capsule_y_center + SYMBOL_HEIGHT/2 + SYMBOL_RADIUS
-                    input_conn_flag = any(name_to_input_connected.get(str(term).strip().replace('.0', ''), False) for term in [terminal_start, terminal_end])
-                    vertical_line_start = y_top_bus_group if input_conn_flag else symbol_top_y + stub_length
-                    draw_group_top_symbol(ax, x_left, x_right, vertical_line_start, text=text, input_connected='Y' if input_conn_flag else 'N')
-                elif input_output == 'output':
-                    symbol_bottom_y = capsule_y_center - SYMBOL_HEIGHT/2 - SYMBOL_RADIUS
-                    output_conn_flag = any(name_to_output_connected.get(str(term).strip().replace('.0', ''), False) for term in [terminal_start, terminal_end])
-                    vertical_line_end = y_bottom_bus_group if output_conn_flag else symbol_bottom_y - stub_length
-                    draw_group_bottom_symbol(ax, x_left, x_right, vertical_line_end, text=text, output_connected='Y' if output_conn_flag else 'N')
-            elif header_type in ['WIREFROM', 'WIRETO']:
-                min_symbol_bottom_local = min(symbol_bottoms[start_idx:end_idx+1]) if symbol_bottoms else None
-                if header_type == 'WIREFROM':
-                    sub_flags = input_connected_flags[start_idx:end_idx+1]
-                    connected_local = [i for i, f in enumerate(sub_flags) if f]
-                    first_hook_x_specific = x_positions[start_idx + connected_local[0]] if connected_local else x_left
-                    draw_header(ax, circuit_id, header_type, x_left, x_right, text,
-                                min_symbol_bottom=min_symbol_bottom_local,
-                                first_hook_x=first_hook_x_specific,
-                                last_hook_x=None,
-                                y_top_bus_group=y_top_bus_group,
-                                y_bottom_bus_group=y_bottom_bus_group)
-                elif header_type == 'WIRETO':
-                    sub_flags = output_connected_flags[start_idx:end_idx+1]
-                    connected_local = [i for i, f in enumerate(sub_flags) if f]
-                    last_hook_x_specific = x_positions[start_idx + connected_local[-1]] if connected_local else x_right
-                    draw_header(ax, circuit_id, header_type, x_left, x_right, text,
-                                min_symbol_bottom=min_symbol_bottom_local,
-                                first_hook_x=None,
-                                last_hook_x=last_hook_x_specific,
-                                y_top_bus_group=y_top_bus_group,
-                                y_bottom_bus_group=y_bottom_bus_group)
+            hook_input_flags = []
+            hook_output_flags = []
+            for j, x in enumerate(x_positions):
+                if j > 0 and x == x_positions[j-1]:
+                    continue
+                symbol_top_y = capsule_y_center + SYMBOL_HEIGHT/2 + SYMBOL_RADIUS
+                symbol_bottom_y = capsule_y_center - SYMBOL_HEIGHT/2 - SYMBOL_RADIUS
+                hooked_in = draw_input_connection(ax, x, symbol_top_y, 'Y' if input_connected_flags[j] else 'N', y_top_bus_group)
+                hooked_out = draw_output_connection(ax, x, symbol_bottom_y, 'Y' if output_connected_flags[j] else 'N', y_bottom_bus_group)
+                hook_input_flags.append(hooked_in)
+                hook_output_flags.append(hooked_out)
 
-        all_x_positions.extend(x_positions)
-        all_input_connected_flags.extend(input_connected_flags)
-        all_output_connected_flags.extend(output_connected_flags)
-        current_x += CIRCUIT_GAP
-        current_row_max_x = max(current_row_max_x, current_x)
-        current_circuit_count += 1
-        min_y = min(min_y, y_bottom_bus_group - 1.8)
-        max_y = max(max_y, y_top_bus_group + 1.8)
+            top_ranges = []
+            bottom_ranges = []
+            circuit_headers_temp = df_header[df_header['circuit_id'] == circuit_id]
+            for _, hrow_temp in circuit_headers_temp.iterrows():
+                header_type_temp = str(hrow_temp.get('header_type', '')).strip().upper()
+                terminal_start_temp = hrow_temp.get('terminal_start')
+                terminal_end_temp = hrow_temp.get('terminal_end', terminal_start_temp)
+                start_name_temp = str(terminal_start_temp).strip().replace('.0', '') if pd.notna(terminal_start_temp) else None
+                end_name_temp = str(terminal_end_temp).strip().replace('.0', '') if pd.notna(terminal_end_temp) else None
+                if pd.isna(start_name_temp) or pd.isna(end_name_temp) or start_name_temp not in terminal_names_for_positions or end_name_temp not in terminal_names_for_positions:
+                    continue
+                start_idx_temp = terminal_names_for_positions.index(start_name_temp)
+                end_idx_temp = terminal_names_for_positions.index(end_name_temp)
+                if start_idx_temp > end_idx_temp:
+                    start_idx_temp, end_idx_temp = end_idx_temp, start_idx_temp
+                if header_type_temp == 'WIREFROM':
+                    top_ranges.append((start_idx_temp, end_idx_temp))
+                elif header_type_temp == 'WIRETO':
+                    bottom_ranges.append((start_idx_temp, end_idx_temp))
+
+            merge_adjacent = True
+            if top_ranges and bottom_ranges:
+                merge_adjacent = False
+
+            top_segments = merge_ranges(top_ranges, merge_adjacent=merge_adjacent)
+            bottom_segments = merge_ranges(bottom_ranges, merge_adjacent=merge_adjacent)
+
+            if not top_segments and any(input_connected_flags):
+                top_segments = [(0, len(x_positions)-1)]
+            if not bottom_segments and any(output_connected_flags):
+                bottom_segments = [(0, len(x_positions)-1)]
+
+            for min_idx, max_idx in top_segments:
+                sub_x = x_positions[min_idx : max_idx + 1]
+                sub_flags = input_connected_flags[min_idx : max_idx + 1]
+                draw_bus_lines(ax, sub_x, sub_flags, y_top_bus_group, gap=0.12)
+                connected_local = [i for i, f in enumerate(sub_flags) if f]
+                if connected_local:
+                    first_local = connected_local[0]
+                    x_first = sub_x[first_local]
+                    ax.plot([x_first - 0.3, x_first], [y_top_bus_group, y_top_bus_group], color='black', linewidth=1)
+                    ax.plot([x_first - 0.3, x_first - 0.3], [y_top_bus_group, y_top_bus_group + 0.2], color='black', linewidth=1)
+
+            for min_idx, max_idx in bottom_segments:
+                sub_x = x_positions[min_idx : max_idx + 1]
+                sub_flags = output_connected_flags[min_idx : max_idx + 1]
+                draw_bus_lines(ax, sub_x, sub_flags, y_bottom_bus_group, gap=0.12)
+                connected_local = [i for i, f in enumerate(sub_flags) if f]
+                if connected_local:
+                    last_local = connected_local[-1]
+                    x_last = sub_x[last_local]
+                    ax.plot([x_last, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group], color='black', linewidth=1)
+                    ax.plot([x_last + 0.3, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group - 0.2], color='black', linewidth=1)
+
+            circuit_groups = df_group[df_group['circuit_id'] == circuit_id] if 'circuit_id' in df_group.columns else pd.DataFrame()
+            name_to_x = {}
+            name_to_output_connected = {}
+            name_to_input_connected = {}
+            for idx, (xval, tname) in enumerate(zip(x_positions, terminal_names_for_positions)):
+                if tname in name_to_x:
+                    continue
+                name_to_x[tname] = xval
+                name_to_output_connected[tname] = output_connected_flags[idx] if idx < len(output_connected_flags) else False
+                name_to_input_connected[tname] = input_connected_flags[idx] if idx < len(input_connected_flags) else False
+
+            x_min = min(x_positions) if x_positions else None
+            x_max = max(x_positions) if x_positions else None
+
+            if not circuit_groups.empty:
+                min_bottom = min(symbol_bottoms) if symbol_bottoms else y_bottom_bus_group
+                x_start_pos = min(x_positions) if x_positions else current_x - pin_spacing
+                x_end_pos = max(x_positions) if x_positions else current_x
+
+                def parse_terminal_no_field(val):
+                    if pd.isna(val):
+                        return None, None
+                    s = str(val).strip()
+                    if ',' in s:
+                        parts = s.split(',')
+                        if len(parts) >= 2:
+                            try:
+                                a = parts[0].strip()
+                                b = parts[1].strip()
+                                return a, b
+                            except ValueError:
+                                pass
+                    if '-' in s:
+                        parts = s.split('-')
+                        if len(parts) >= 2:
+                            try:
+                                a = parts[0].strip()
+                                b = parts[1].strip()
+                                return a, b
+                            except ValueError:
+                                pass
+                    return s, s
+
+                for _, grow in circuit_groups.iterrows():
+                    tn_field = grow.get('terminal_no')
+                    start_name, end_name = parse_terminal_no_field(tn_field)
+                    x_start_term = name_to_x.get(start_name, x_min)
+                    x_end_term = name_to_x.get(end_name, x_max)
+                    if x_start_term is None or x_end_term is None:
+                        continue
+                    label_text = grow.get('text', '')
+                    io_field = str(grow.get('input_output', '')).strip().lower()
+                    if io_field == 'input':
+                        y_relay = y_top_bus_group + 0.55
+                        draw_relay_input(ax, x_start_term, x_end_term, y=y_relay, scale=1.0, text=str(label_text))
+                    elif io_field == 'output':
+                        y_relay = y_bottom_bus_group - 0.55
+                        draw_relay_output(ax, x_start_term, x_end_term, y=y_relay, scale=1.0, text=str(label_text))
+                    else:
+                        center_x = (x_start_term + x_end_term) / 2.0
+                        ax.text(center_x, y_top_bus_group + 0.2, str(label_text), ha='center', va='bottom', fontsize=8, fontweight='bold')
+
+            circuit_headers = df_header[df_header['circuit_id'] == circuit_id]
+            for _, hrow in circuit_headers.iterrows():
+                header_type = str(hrow.get('header_type', '')).strip().upper()
+                terminal_start = hrow.get('terminal_start')
+                terminal_end = hrow.get('terminal_end', terminal_start)
+                input_output = str(hrow.get('input_output', '')).strip().lower()
+                text = hrow.get('text', '')
+                if pd.isna(text) or str(text).strip() == '':
+                    text = ''
+                else:
+                    text = str(text).strip()
+                start_name = str(terminal_start).strip().replace('.0', '') if pd.notna(terminal_start) else None
+                end_name = str(terminal_end).strip().replace('.0', '') if pd.notna(terminal_end) else None
+                if pd.isna(start_name) or pd.isna(end_name) or start_name not in terminal_names_for_positions or end_name not in terminal_names_for_positions:
+                    continue
+                start_idx = terminal_names_for_positions.index(start_name)
+                end_idx = terminal_names_for_positions.index(end_name)
+                if start_idx > end_idx:
+                    start_idx, end_idx = end_idx, start_idx
+                x_left = x_positions[start_idx]
+                x_right = x_positions[end_idx]
+
+                if header_type == 'RELAY':
+                    if input_output == 'input':
+                        symbol_top_y = capsule_y_center + SYMBOL_HEIGHT/2 + SYMBOL_RADIUS
+                        input_conn_flag = any(name_to_input_connected.get(str(term).strip().replace('.0', ''), False) for term in [terminal_start, terminal_end])
+                        vertical_line_start = y_top_bus_group if input_conn_flag else symbol_top_y + stub_length
+                        draw_group_top_symbol(ax, x_left, x_right, vertical_line_start, text=text, input_connected='Y' if input_conn_flag else 'N')
+                    elif input_output == 'output':
+                        symbol_bottom_y = capsule_y_center - SYMBOL_HEIGHT/2 - SYMBOL_RADIUS
+                        output_conn_flag = any(name_to_output_connected.get(str(term).strip().replace('.0', ''), False) for term in [terminal_start, terminal_end])
+                        vertical_line_end = y_bottom_bus_group if output_conn_flag else symbol_bottom_y - stub_length
+                        draw_group_bottom_symbol(ax, x_left, x_right, vertical_line_end, text=text, output_connected='Y' if output_conn_flag else 'N')
+                elif header_type in ['WIREFROM', 'WIRETO']:
+                    min_symbol_bottom_local = min(symbol_bottoms[start_idx:end_idx+1]) if symbol_bottoms else None
+                    if header_type == 'WIREFROM':
+                        sub_flags = input_connected_flags[start_idx:end_idx+1]
+                        connected_local = [i for i, f in enumerate(sub_flags) if f]
+                        first_hook_x_specific = x_positions[start_idx + connected_local[0]] if connected_local else x_left
+                        draw_header(ax, circuit_id, header_type, x_left, x_right, text,
+                                    min_symbol_bottom=min_symbol_bottom_local,
+                                    first_hook_x=first_hook_x_specific,
+                                    last_hook_x=None,
+                                    y_top_bus_group=y_top_bus_group,
+                                    y_bottom_bus_group=y_bottom_bus_group)
+                    elif header_type == 'WIRETO':
+                        sub_flags = output_connected_flags[start_idx:end_idx+1]
+                        connected_local = [i for i, f in enumerate(sub_flags) if f]
+                        last_hook_x_specific = x_positions[start_idx + connected_local[-1]] if connected_local else x_right
+                        draw_header(ax, circuit_id, header_type, x_left, x_right, text,
+                                    min_symbol_bottom=min_symbol_bottom_local,
+                                    first_hook_x=None,
+                                    last_hook_x=last_hook_x_specific,
+                                    y_top_bus_group=y_top_bus_group,
+                                    y_bottom_bus_group=y_bottom_bus_group)
+
+            all_x_positions.extend(x_positions)
+            all_input_connected_flags.extend(input_connected_flags)
+            all_output_connected_flags.extend(output_connected_flags)
+            current_x += CIRCUIT_GAP
+            current_row_max_x = max(current_row_max_x, current_x)
+            current_circuit_count += 1
+            min_y = min(min_y, y_bottom_bus_group - 1.8)
+            max_y = max(max_y, y_top_bus_group + 1.8)
 
     overall_max_x = max(overall_max_x, current_row_max_x)
-    margin = 1.0
-    if all_x_positions:
-        ax.set_xlim(start_x - 1.5, overall_max_x - 0.5)
-    else:
-        ax.set_xlim(0, 10)
-    if min_y == float('inf') or max_y == float('-inf'):
-        ax.set_ylim(0, 5)
-    else:
-        ax.set_ylim(min_y, max_y + JUNCTION_BOX_Y_OFFSET)
 
+    # Calculate page center for junction box
     if all_x_positions:
         page_center_x = (min(all_x_positions) + max(all_x_positions)) / 2
     else:
         page_center_x = (start_x + overall_max_x) / 2
-    junction_box_y = CAPSULE_Y_CENTER_BASE + JUNCTION_BOX_Y_OFFSET + y_offset
+
+    # Add top margin for junction box and set ylim accordingly
+    top_margin = 3.0
+    bottom_margin = 1.0
+
+    if min_y == float('inf') or max_y == float('-inf'):
+        min_y = 0
+        max_y = 5
+
+    # Draw junction box at the top of the page
+    junction_box_y = max_y + top_margin - 1.0
     draw_junction_box(ax, page_center_x, junction_box_y, junction_name)
+
+    # Set axis limits with proper margins
+    ax.set_xlim(start_x - 1.5, overall_max_x - 0.5)
+    ax.set_ylim(min_y - bottom_margin, max_y + top_margin)
 
     return all_x_positions, all_input_connected_flags, all_output_connected_flags
 
@@ -1014,7 +1135,7 @@ for junction in junction_names:
     if 'letter_order' in junction_circuits.columns and 'start_no' in junction_circuits.columns:
         junction_circuits = junction_circuits.sort_values(['letter_order', 'start_no'], na_position='last')
     elif 'start_no' in junction_circuits.columns:
-        junction_circuits = junction_circuits.sort_values(['start_no'], na_position='last')
+        junction_circuits = junction_circuits.sort_values(['start_no', 'letter_order'], na_position='last')
     circuit_list = junction_circuits['circuit_id'].tolist()
 
     for circuit_id_pre in circuit_list:
@@ -1107,7 +1228,9 @@ with PdfPages(output_file) as pdf:
             df_symbols, ax, page_circuit_ids, junction_name,
             start_x=1, pin_spacing=pin_spacing,
             circuits_per_page=circuits_per_page,
-            page_number=page_num
+            page_number=page_num,
+            circuits_per_row=circuits_per_row,
+            max_rows_visible=4  # enforce 4 visible rows; 5th row will be blank if triggered
         )
 
         plt.tight_layout()
