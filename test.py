@@ -108,6 +108,20 @@ def draw_relay_input(ax, x_left, x_right, y=0, scale=1.0, text='RELAY', anchor_t
     ax.text(center, text_y, str(text), ha='center', va='bottom',
             fontsize=int(18 * scale), fontweight='bold')
 
+    # Add two small vertical lines on upper side if text is "LIGHT"
+    if str(text).strip().upper() == "LIGHT":
+        line_length = 0.3 * scale
+        gap = 0.25 * scale  # increase gap between lines
+        left_line_x = center - gap
+        right_line_x = center + gap
+        base_y = y - v_offset - 0.4 * scale  # move lines slightly down side 
+
+        # Left vertical line
+        ax.plot([left_line_x, left_line_x], [base_y, base_y + line_length], color='black', linewidth=1.4)
+        # Right vertical line
+        ax.plot([right_line_x, right_line_x], [base_y, base_y + line_length], color='black', linewidth=1.4)
+
+
 # === Relay output symbol ===
 def draw_relay_output(ax, x_left, x_right, y=0, scale=1.0, text='RELAY', anchor_to_v_tip=False, v_offset=0.5):
     if x_left is None or x_right is None:
@@ -155,12 +169,51 @@ def draw_relay_output(ax, x_left, x_right, y=0, scale=1.0, text='RELAY', anchor_
             ha='center', va='top',
             fontsize=int(18 * scale),
             fontweight='bold', linespacing=1.2)
+    
+    # Add two small vertical lines on upper side if text is "LIGHT"
+    # Add two small vertical lines on upper side if text is "LIGHT"
+    if str(text).strip().upper() == "LIGHT":
+        line_length = 0.3 * scale
+        gap = 0.25 * scale  # increase gap between lines
+        left_line_x = center - gap
+        right_line_x = center + gap
+        base_y = y - v_offset + 0.1 * scale  # move lines slightly upward
 
-def draw_group_top_symbol(ax, x_start, x_end, y, text='R1', scale=1.0, input_connected='N'):
+        # Left vertical line
+        ax.plot([left_line_x, left_line_x], [base_y, base_y + line_length], color='black', linewidth=1.4)
+        # Right vertical line
+        ax.plot([right_line_x, right_line_x], [base_y, base_y + line_length], color='black', linewidth=1.4)
+
+
+def draw_group_top_symbol(
+    ax,
+    x_start,
+    x_end,
+    y,
+    texts='R1',
+    scale=1.0,
+    input_connected='N',
+    spacing=0.3,                # Controls vertical spacing between stacked symbols
+    x_offset=0.3,               # Horizontal offset for duplicate symbols
+    diagonal_length=0.21,       # Length of the diagonal bar
+    split_text=True,            # Whether to split text longer than 3 characters
+    split_length=3,             # Length threshold for splitting text
+    draw_diagonal=True,         # Whether to draw the diagonal bar (/)
+    draw_vertical=True,         # Whether to draw the small vertical line (|)
+    vertical_linewidth=1.2,     # Line width for the small vertical line
+    diagonal_linewidth=1.2      # Line width for the diagonal bar
+):
+    if isinstance(texts, str):
+        texts = [texts]
     x = (x_start + x_end) / 2.0 if abs(x_end - x_start) < 0.1 else x_start
     line_extension = 0.35 * scale
     relay_gap = 0.1 * scale if str(input_connected).strip().upper() == 'Y' else 0.0
     base_y = y + relay_gap
+
+    num_texts = len(texts)
+    spacing = spacing * scale  # Spacing for stacking symbols
+    total_extra = (num_texts - 1) * spacing
+    line_extension += total_extra
 
     # Vertical center line (going up)
     ax.plot([x, x], [base_y, base_y + line_extension], color='black', linewidth=1)
@@ -184,65 +237,88 @@ def draw_group_top_symbol(ax, x_start, x_end, y, text='R1', scale=1.0, input_con
     ax.plot([seg_x1, seg_x2], [y_bottom + horizontal_offset, y_bottom + horizontal_offset],
             color='black', linewidth=1)
 
-    # Diagonal bar (mirrored like the bottom)
-    diagonal_length = 0.21 * scale
+    # Stack diagonal bars with small vertical/diagonal connectors if multiple texts
+    diagonal_length = diagonal_length * scale
     y_shift = -0.17 * scale
     diag_offset = -0.05 * scale
     left_adjust = -0.04 * scale
     right_adjust = 0.04 * scale
     down_shift = -0.01 * scale
+    prev_center_y = None
+    x_offset = x_offset * scale  # Shift for duplicates
 
-    left_y = base_y + line_extension - diagonal_length - y_shift + left_adjust + diag_offset + down_shift
-    right_y = base_y + line_extension - y_shift + right_adjust + diag_offset + down_shift
+    for i in range(num_texts):
+        extra_shift = i * spacing
+        # Apply x_offset for duplicates (i > 0)
+        current_x = x + x_offset if i > 0 else x
+        left_y = base_y + line_extension - diagonal_length - y_shift + left_adjust + diag_offset + down_shift + extra_shift
+        right_y = base_y + line_extension - y_shift + right_adjust + diag_offset + down_shift + extra_shift
 
-    ax.plot([x - diagonal_length / 2, x + diagonal_length / 2],
-            [left_y, right_y],
-            color='black', linewidth=1.2)
+        # --- Original diagonal bar (/) ---
+        if draw_diagonal:
+            ax.plot([current_x - diagonal_length / 2, current_x + diagonal_length / 2],
+                    [left_y, right_y],
+                    color='black', linewidth=diagonal_linewidth)
 
-    # --- Text label ---
-    text_offset = -0.1 * scale
-    text_y = base_y + line_extension + 0.1 - y_shift + text_offset
-    display_text = str(text).strip()
+            # --- NEW: stacked diagonal connector between symbols ---
+            if prev_center_y is not None:
+                ax.plot([current_x - diagonal_length / 2, current_x + diagonal_length / 2],
+                        [prev_center_y, (left_y + right_y) / 2.0],
+                        color='black', linewidth=10)
 
-    # Split text into two lines if longer than 3 characters
-    if len(display_text) > 3:
-        mid = len(display_text) // 2
-        # Split around the middle
-        display_text = display_text[:mid] + '\n' + display_text[mid:]
+        center_y = (left_y + right_y) / 2.0
 
-    ax.text(x, text_y, display_text, ha='center', va='bottom',
-            fontsize=int(17 * scale), fontweight='bold')
+        # --- Vertical connector (|) ---
+        if draw_vertical and prev_center_y is not None:
+            ax.plot([current_x, current_x], [prev_center_y, center_y],
+                    color='black', linewidth=10)
+
+        prev_center_y = center_y
+
+        # --- Text label ---
+        text_offset = -0.1 * scale
+        text_y = base_y + line_extension + 0.1 - y_shift + text_offset + extra_shift
+        display_text = str(texts[i]).strip()
+
+        # Split text into two lines if enabled and longer than split_length
+        if split_text and len(display_text) > split_length:
+            mid = len(display_text) // 2
+            display_text = display_text[:mid] + '\n' + display_text[mid:]
+
+        ax.text(current_x, text_y, display_text, ha='center', va='bottom',
+                fontsize=int(17 * scale), fontweight='bold')
 
 
-def draw_group_bottom_symbol(ax, x_start, x_end, y, text='R1', scale=1.0, output_connected='N'):
+def draw_group_bottom_symbol(ax, x_start, x_end, y, text='R1', scale=1.0, output_connected='N', choke_output_terminal=None):
     x = (x_start + x_end) / 2.0 if abs(x_end - x_start) < 0.1 else x_start
     line_extension = 0.35 * scale
     relay_gap = 0.1 * scale if str(output_connected).strip().upper() == 'Y' else 0.0
     base_y = y - relay_gap
 
     # Vertical center line
-    ax.plot([x, x], [base_y, base_y - line_extension], color='black', linewidth=1)
+    if choke_output_terminal is None:
+        ax.plot([x, x], [base_y, base_y - line_extension], color='black', linewidth=1)
 
     # One /‾‾‾‾‾‾ style segment at the bottom (diagonal first, horizontal after)
     total_width = x_end - x_start
-    horizontal_ratio = 0.85  # % of segment for horizontal line
+    horizontal_ratio = 0.85
     y_bottom = base_y - 0.11 * scale
     rise_height = 0.08 * scale
-    y_top = y_bottom + rise_height  # upward for bottom symbol
+    y_top = y_bottom + rise_height
 
     seg_x0 = x_start
     seg_x2 = x_end
-    seg_x1 = seg_x0 + total_width * (1 - horizontal_ratio)  # end of diagonal
+    seg_x1 = seg_x0 + total_width * (1 - horizontal_ratio)
 
     # Diagonal up (/ shape) first
     ax.plot([seg_x1, seg_x0], [y_bottom, y_top], color='black', linewidth=1)
 
     # Horizontal line after diagonal (slightly lower)
-    horizontal_offset = 0.08 * scale  # adjust this value as needed
+    horizontal_offset = 0.08 * scale
     ax.plot([seg_x1, seg_x2], [y_top - horizontal_offset, y_top - horizontal_offset],
             color='black', linewidth=1)
 
-    # Diagonal bar (same as before)
+    # Diagonal bar
     diagonal_length = 0.21 * scale
     y_shift = 0.07 * scale
     diag_offset = 0.05 * scale
@@ -251,13 +327,62 @@ def draw_group_bottom_symbol(ax, x_start, x_end, y, text='R1', scale=1.0, output
     diagonal_down_shift = 0.02 * scale
     left_y = base_y - line_extension - diagonal_length + y_shift + left_adjust + diag_offset - diagonal_down_shift
     right_y = base_y - line_extension + y_shift + right_adjust + diag_offset - diagonal_down_shift
-    ax.plot([x - diagonal_length/2, x + diagonal_length/2],
-            [left_y, right_y],
-            color='black', linewidth=1.2)
+
+    if choke_output_terminal is None:
+        ax.plot([x - diagonal_length/2, x + diagonal_length/2],
+                [left_y, right_y],
+                color='black', linewidth=1.2)
+
+    # If choke output terminal is specified, add horizontal line and terminal label
+    if choke_output_terminal is not None:
+
+
+        # Diagonal bar
+        diagonal_length = 0.21 * scale
+        y_shift = 0.07 * scale
+        diag_offset = 0.05 * scale
+        left_adjust = 0.04 * scale
+        right_adjust = -0.04 * scale
+        diagonal_down_shift = 0.02 * scale
+        # Recalculate left_y and right_y
+        left_y = base_y - line_extension - diagonal_length + y_shift + left_adjust + diag_offset - diagonal_down_shift
+        right_y = base_y - line_extension + y_shift + right_adjust + diag_offset - diagonal_down_shift
+        # Draw the diagonal line
+        dx = 0.5  # adjust this value as needed
+        ax.plot([x - diagonal_length/2 + dx, x + diagonal_length/2 + dx],
+                [left_y, right_y],
+                color='black', linewidth=1.2)
+
+
+        # Horizontal line extending to the right
+        horiz_length = 0.5 * scale
+        left_shift = 0.1  # how much to move left
+        end_x = x + diagonal_length/2 + horiz_length - left_shift  # move end slightly left
+        start_x = x + diagonal_length/2 - left_shift  # move start slightly left
+        line_y_shift = 2.78   # move horizontal line upward
+        line_y = right_y + line_y_shift
+        # Horizontal line
+        ax.plot([start_x, end_x], [line_y, line_y], color='black', linewidth=1.2)
+
+        # Vertical line going downward from end of horizontal line
+        vertical_length = 2.84  # length downward
+        ax.plot([end_x, end_x], [line_y, line_y - vertical_length], color='black', linewidth=1.2)
+
 
     # Text label
+    # Text label
     text_offset = 0.2 * scale
-    text_y = base_y - line_extension - diagonal_length - 0.1 + y_shift + text_offset - 0.05
+
+    # Adjust text_y and text_x based on whether choke_output_terminal is present
+    if choke_output_terminal is not None:
+        # Position text below the choke's horizontal line
+        text_y = right_y - text_offset - 0.05  # Additional downward shift for choke
+        text_x = x + 0.55  # move slightly to the right
+    else:
+        # Original position for non-choke cases
+        text_y = base_y - line_extension - diagonal_length - 0.1 + y_shift + text_offset - 0.05
+        text_x = x  # keep centered
+
     display_text = str(text).strip()
 
     # Split text into two lines if longer than 3 characters
@@ -265,7 +390,8 @@ def draw_group_bottom_symbol(ax, x_start, x_end, y, text='R1', scale=1.0, output
         mid = len(display_text) // 2
         display_text = display_text[:mid] + '\n' + display_text[mid:]
 
-    ax.text(x, text_y, display_text, ha='center', va='top',
+    # Draw text
+    ax.text(text_x, text_y, display_text, ha='center', va='top',
             fontsize=int(17 * scale), fontweight='bold', linespacing=1.2)
 
 
@@ -318,6 +444,10 @@ try:
     df_group.columns = df_group.columns.str.strip()
     df_circuit = pd.read_excel(EXCEL_FILE, sheet_name='circuit')
     df_circuit.columns = df_circuit.columns.str.strip()
+    df_choke = pd.read_excel(EXCEL_FILE, sheet_name='choketable')
+    df_choke.columns = df_choke.columns.str.strip()
+    df_resistor = pd.read_excel(EXCEL_FILE, sheet_name='resistortable')
+    df_resistor.columns = df_resistor.columns.str.strip()
 except Exception as e:
     print(f"Error reading required sheets from Excel file: {e}")
     sys.exit(1)
@@ -342,12 +472,12 @@ CIRCUIT_GAP = 2.0
 vertical_gap = 6.5
 
 # Footer dimensions (adjusted to match row spacing)
-footer_height = 2.5  # Adjusted footer height
+footer_height = 2.75  # Adjusted footer height
 footer_inch_add = 4.0  # Reduced additional inches for footer
 
-# === Header Function ===
+# === Updated draw_header ===
 def draw_header(ax, circuit_id, header_type, x_start, x_end, text, min_symbol_bottom=None,
-                first_hook_x=None, last_hook_x=None, y_top_bus_group=0, y_bottom_bus_group=0):
+                first_hook_x=None, last_hook_x=None, y_top_bus_group=0, y_bottom_bus_group=0, special_ha=False):
     top_y_offset = 0.1
     bottom_y_offset = 0.85
     if pd.isna(text) or str(text).strip() == '':
@@ -361,7 +491,7 @@ def draw_header(ax, circuit_id, header_type, x_start, x_end, text, min_symbol_bo
         ha = 'center'
         x_pos = last_hook_x if last_hook_x is not None else (x_start + x_end) / 2.0
         if last_hook_x is not None:
-            ha = 'right'
+            ha = 'left' if special_ha else 'right'
         min_symbol_bottom = y_bottom_bus_group - 0.2 if min_symbol_bottom is None else min_symbol_bottom
         text_offset = -0.15
         y_pos = min_symbol_bottom - bottom_y_offset + text_offset
@@ -437,49 +567,86 @@ def draw_capsule(ax, x, y_center, terminal_name, input_left, input_right, output
     oc = 'Y' if str(output_connected).strip().upper() == 'Y' else 'N'
     return top_conn, bottom_conn, ic, oc
 
-def draw_s_fuse(ax, x, y_center, terminal_name, input_left=None, input_right=None, output_left=None, output_right=None, input_connected='N', output_connected='N'):
+def draw_s_fuse(ax, x, y_center, terminal_name,
+                input_left=None, input_right=None,
+                output_left=None, output_right=None,
+                input_connected='N', output_connected='N'):
     fuse_top = y_center + SYMBOL_HEIGHT / 2
     fuse_bottom = y_center - SYMBOL_HEIGHT / 2
     top_circle_radius = SYMBOL_RADIUS * 0.8
     bottom_circle_radius = SYMBOL_RADIUS * 0.8
+
+    # Draw circles
     ax.add_patch(Circle((x, fuse_top), top_circle_radius,
                         edgecolor='black', facecolor='white', linewidth=1))
     ax.add_patch(Circle((x, fuse_bottom), bottom_circle_radius,
                         edgecolor='black', facecolor='white', linewidth=1))
+
+    # Curved middle connection
     start = (x, fuse_top - top_circle_radius)
     end = (x, fuse_bottom + bottom_circle_radius)
     ctrl1 = (x + SYMBOL_RADIUS * 2.2, y_center + SYMBOL_HEIGHT * 0.15)
     ctrl2 = (x - SYMBOL_RADIUS * 2.2, y_center - SYMBOL_HEIGHT * 0.15)
     t = np.linspace(0, 1, 100)
-    xs = (1 - t)**3 * start[0] + 3 * (1 - t)**2 * t * ctrl1[0] + 3 * (1 - t) * t**2 * ctrl2[0] + t**3 * end[0]
-    ys = (1 - t)**3 * start[1] + 3 * (1 - t)**2 * t * ctrl1[1] + 3 * (1 - t) * t**2 * ctrl2[1] + t**3 * end[1]
+    xs = (1 - t)**3 * start[0] + 3 * (1 - t)**2 * t * ctrl1[0] + \
+         3 * (1 - t) * t**2 * ctrl2[0] + t**3 * end[0]
+    ys = (1 - t)**3 * start[1] + 3 * (1 - t)**2 * t * ctrl1[1] + \
+         3 * (1 - t) * t**2 * ctrl2[1] + t**3 * end[1]
     ax.plot(xs, ys, color='black', linewidth=1, solid_capstyle='round')
+
+    # Format function (same as capsule)
+    def format_text(t):
+        t = str(t)
+        if len(t) >= 8:
+            words = t.split()
+            if len(words) > 1:
+                line1 = " ".join(words[:-1])
+                line2 = words[-1]
+                return f"{line1}\n{line2}"
+            else:
+                return t[:8] + "\n" + t[8:]
+        return t
+
+    # Terminal name
     if pd.notna(terminal_name) and str(terminal_name).strip() != '':
         term_str = str(terminal_name)
         if term_str.endswith('.0'):
             term_str = term_str[:-2]
-        ax.text(x - 0.1, y_center + 0.01, term_str, ha='center', va='center', fontsize=12)
+        ax.text(x - 0.1, y_center + 0.01, term_str,
+                ha='center', va='center', fontsize=12)
+
+    # Input/Output labels with auto split
     input_left_offset = 0.005
     if pd.notna(input_left) and str(input_left).strip() != "":
-        ax.text(x - input_left_offset, fuse_top + 0.18, str(input_left),
-                fontsize=12, ha='right', va='bottom', rotation=90)
+        ax.text(x - input_left_offset, fuse_top + 0.18,
+                format_text(input_left), fontsize=12,
+                ha='right', va='bottom', rotation=90, linespacing=1.2)
+
     input_right_offset = 0.05
     if pd.notna(input_right) and str(input_right).strip() != "":
-        ax.text(x + input_right_offset, fuse_top + 0.18, str(input_right),
-                fontsize=12, ha='left', va='bottom', rotation=90)
+        ax.text(x + input_right_offset, fuse_top + 0.18,
+                format_text(input_right), fontsize=12,
+                ha='left', va='bottom', rotation=90, linespacing=1.2)
+
     output_left_offset = 0.005
     if pd.notna(output_left) and str(output_left).strip() != "":
-        ax.text(x - output_left_offset, fuse_bottom - 0.15, str(output_left),
-                fontsize=12, ha='right', va='top', rotation=90)
+        ax.text(x - output_left_offset, fuse_bottom - 0.15,
+                format_text(output_left), fontsize=12,
+                ha='right', va='top', rotation=90, linespacing=1.2)
+
     output_right_offset = 0.05
     if pd.notna(output_right) and str(output_right).strip() != "":
-        ax.text(x + output_right_offset, fuse_bottom - 0.18, str(output_right),
-                fontsize=12, ha='left', va='top', rotation=90)
+        ax.text(x + output_right_offset, fuse_bottom - 0.18,
+                format_text(output_right), fontsize=12,
+                ha='left', va='top', rotation=90, linespacing=1.2)
+
+    # Connections
     top_conn = (x, fuse_top + top_circle_radius)
     bottom_conn = (x, fuse_bottom - bottom_circle_radius)
     ic = 'Y' if str(input_connected).strip().upper() == 'Y' else 'N'
     oc = 'Y' if str(output_connected).strip().upper() == 'Y' else 'N'
     return top_conn, bottom_conn, ic, oc
+
 
 def draw_choke(ax, x, y_center, terminal_name):
     row = find_row_by_term(terminal_name)
@@ -526,6 +693,88 @@ def draw_choke(ax, x, y_center, terminal_name):
     ic = 'Y' if str(input_connected).strip().upper() == 'Y' else 'N'
     oc = 'Y' if str(output_connected).strip().upper() == 'Y' else 'N'
     return top_conn, bottom_conn, ic, oc
+
+# === Updated draw_horizontal_choke ===
+def draw_horizontal_choke(ax, x_center, y_center, label='CHOKE',
+                          box_width=0.45, box_height=0.35,
+                          special_end=False, output_label=''):
+    # shift downward
+    y_shift = -0.5   # adjust this value to move more/less down
+
+    left_x = x_center - box_width / 2
+    right_x = x_center + box_width / 2
+    bottom_y = (y_center + y_shift) - box_height / 2
+
+    # Draw rounded box
+    choke_box = FancyBboxPatch((left_x, bottom_y),
+                               box_width, box_height,
+                               boxstyle="round,pad=0.02",
+                               edgecolor='black', facecolor='white', linewidth=1.5)
+    ax.add_patch(choke_box)
+
+    # Draw label (moved with same y_shift)
+    ax.text(x_center, y_center + y_shift, label,
+            fontsize=18, ha='center', va='center', fontweight='bold')
+
+    # Connection lines
+    line_length = 0.075
+    delta = 0.02
+    vert_line_height = 0.5  # how tall the vertical lines go upward
+
+    # Left connection line 
+    left_horiz_start = left_x - line_length - delta
+    left_horiz_end   = left_x - delta
+
+    ax.plot([left_horiz_start, left_horiz_end],
+            [y_center + y_shift, y_center + y_shift],
+            color='black', linewidth=1)
+
+    # vertical up from left end (moved slightly left)
+    v_offset = 0.005  # shift amount
+    ax.plot([left_horiz_start - v_offset, left_horiz_start - v_offset],
+            [y_center + y_shift, y_center + y_shift + vert_line_height],
+            color='black', linewidth=1)
+
+    vert_x = None
+    if not special_end:
+        # Right connection line
+        right_horiz_start = right_x + delta
+        right_horiz_end   = right_x + line_length + delta
+        ax.plot([right_horiz_start, right_horiz_end],
+                [y_center + y_shift, y_center + y_shift],
+                color='black', linewidth=1)
+
+        # vertical up from right end (moved slightly right)
+        ax.plot([right_horiz_end + v_offset, right_horiz_end + v_offset],
+                [y_center + y_shift, y_center + y_shift + vert_line_height],
+                color='black', linewidth=1)
+
+    else:
+        # special right end
+        horiz_length = 0.2
+        slant_size = 0.3
+        vertical_length = 0.5
+        ax.plot([right_x + delta, right_x + delta + horiz_length],
+                [y_center + y_shift, y_center + y_shift],
+                color='black', linewidth=1.4)
+        end_horiz_x = right_x + delta + horiz_length
+        ax.plot([end_horiz_x, end_horiz_x + slant_size],
+                [y_center + y_shift, y_center + y_shift - slant_size],
+                color='black', linewidth=1.4)
+        vert_x = end_horiz_x + slant_size
+        vert_top_y = y_center + y_shift - slant_size
+        vert_bottom_y = vert_top_y - vertical_length
+        ax.plot([vert_x, vert_x], [vert_top_y, vert_bottom_y],
+                color='black', linewidth=1.4)
+        # label
+        label_offset = 0.05
+        label_y = (vert_top_y + vert_bottom_y) / 2
+        ax.text(vert_x + label_offset, label_y, output_label,
+                ha='left', va='center', fontsize=12, rotation=90)
+
+    return vert_x
+
+
 
 def draw_dual_fuse(ax, x_left, y_center, left_term, right_term, left_input_left=None, left_input_right=None, left_output_left=None, left_output_right=None, left_input_connected='N', left_output_connected='N', right_input_left=None, right_input_right=None, right_output_left=None, right_output_right=None, right_input_connected='N', right_output_connected='N'):
     INNER_SPACING_MULT = 2.8
@@ -590,6 +839,68 @@ def draw_dual_fuse(ax, x_left, y_center, left_term, right_term, left_input_left=
     bottom_conn = (x_left, bottom_rail_y)
     return top_conn, bottom_conn, left_ic, left_oc, right_ic, right_oc
 
+def draw_resistor(ax, x, y_center, input_terminal='', output_terminal='', resistor_name='R', input_x_pos=None, output_x_pos=None):
+    radius = SYMBOL_RADIUS * 1.5
+    ax.add_patch(Circle((x, y_center), radius, edgecolor='black', facecolor='white', linewidth=1))
+    ax.text(x, y_center, resistor_name, ha='center', va='center', fontsize=12, fontweight='bold')
+    
+    # Upper vertical line
+    upper_y_start = y_center + radius
+    upper_y_end = y_center + radius * 7.5
+    ax.plot([x, x], [upper_y_start, upper_y_end], color='black', linewidth=1)
+    
+    # Upper horizontal lines (dynamic to multiple input_x_pos if provided) with vertical drop at start
+    upper_labels = [label.strip() for label in str(input_terminal).strip().split(',') if label.strip()]
+    if input_x_pos is not None and isinstance(input_x_pos, (list, tuple)) and upper_labels:
+        for i in range(len(upper_labels)):
+            label = upper_labels[i]
+            pos = input_x_pos[i] if i < len(input_x_pos) else x
+            if i == 0:
+                left_x = min(pos, x)
+            else:
+                left_x = min(input_x_pos[i-1], pos) if i > 0 and i < len(input_x_pos) else min(pos, x)
+            right_x = max(pos, x) if i == len(upper_labels) - 1 else (input_x_pos[i + 1] if i + 1 < len(input_x_pos) else x)
+            ax.plot([left_x, right_x], [upper_y_end, upper_y_end], color='black', linewidth=1)
+            # Add small vertical line downward from the left end
+            vertical_drop_length = 0.5
+            ax.plot([left_x, left_x], [upper_y_end, upper_y_end - vertical_drop_length], color='black', linewidth=1)
+            if label:
+                ax.text((left_x + right_x) / 2, upper_y_end + 0.05, label, ha='center', va='bottom', fontsize=12)
+    else:
+        upper_horiz_length = 0.5 + len(str(input_terminal).strip()) * 0.12
+        ax.plot([x - upper_horiz_length, x], [upper_y_end, upper_y_end], color='black', linewidth=1)
+    
+    # Lower vertical line
+    # Lower vertical line
+    lower_y_start = y_center - radius
+    lower_y_end = y_center - radius * 6
+    ax.plot([x, x], [lower_y_start, lower_y_end], color='black', linewidth=1)
+    
+    # Lower horizontal lines (dynamic to multiple output_x_pos if provided) with vertical rise at start
+    lower_labels = [label.strip() for label in str(output_terminal).strip().split(',') if label.strip()]
+    if output_x_pos is not None and isinstance(output_x_pos, (list, tuple)) and lower_labels:
+        for i in range(len(lower_labels)):
+            label = lower_labels[i]
+            pos = output_x_pos[i] if i < len(output_x_pos) else x
+            if i == 0:
+                left_x = min(pos, x)
+            else:
+                left_x = min(output_x_pos[i-1], pos) if i > 0 and i < len(output_x_pos) else min(pos, x)
+            right_x = max(pos, x) if i == len(lower_labels) - 1 else (output_x_pos[i + 1] if i + 1 < len(output_x_pos) else x)
+            ax.plot([left_x, right_x], [lower_y_end, lower_y_end], color='black', linewidth=1)
+            # Add small vertical line upward from the left end
+            vertical_drop_length = 0.5
+            ax.plot([left_x, left_x], [lower_y_end, lower_y_end + vertical_drop_length], color='black', linewidth=1)
+            if label:
+                ax.text((left_x + right_x) / 2, lower_y_end - 0.05, label, ha='center', va='top', fontsize=12)
+    else:
+        lower_horiz_length = 0.5 + len(str(output_terminal).strip()) * 0.12
+        ax.plot([x - lower_horiz_length, x], [lower_y_end, lower_y_end], color='black', linewidth=1)
+    
+    return None, None
+
+
+
 def draw_input_connection(ax, x, symbol_top_y, connected_flag, y_top_bus_group):
     overlap = SYMBOL_RADIUS * 0.15
     start_y = symbol_top_y - overlap
@@ -621,8 +932,7 @@ def draw_bus_lines(ax, x_positions, connected_flags, bus_y, gap=0.12, extra=0.12
         x_start = x_positions[start_idx]
         x_end = x_positions[end_idx]
         if start_idx == end_idx:
-            small = max(0.06, gap)
-            ax.plot([x_start - small, x_start + small], [bus_y, bus_y], color='black', linewidth=1)
+            pass
         else:
             total_len = x_end - x_start
             shrink = min(gap, total_len / 4.0)
@@ -661,7 +971,7 @@ def parse_terminal_no_field(val):
     return s, s
 
 # === Main Draw Function ===
-def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, pin_spacing=0.8, circuits_per_page=12, page_number=1, max_terminal_symbols_per_row=36, max_rows_visible=3, page_width=None):
+def draw_symbols(df, ax, ordered_circuit_ids, junction_name, start_x=1, pin_spacing=0.8, circuits_per_page=12, page_number=1, max_terminal_symbols_per_row=36, max_rows_visible=3, page_width=None):
     """
     Draw symbols for the provided ordered_circuit_ids on ax.
     max_terminal_symbols_per_row: maximum number of terminal symbols per row (default 36).
@@ -828,22 +1138,9 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
                     current_row_max_x = max(current_row_max_x, current_x)
                     current_terminal_count += 1
                     i += 1
-                elif symbol == 'choke':
-                    top_conn, bottom_conn, input_conn, output_conn = draw_choke(
-                        ax, current_x, capsule_y_center, row.get('terminal_name')
-                    )
-                    x_positions.append(current_x)
-                    tname = str(row.get('terminal_name')).strip()
-                    if tname.endswith('.0'):
-                        tname = tname[:-2]
-                    terminal_names_for_positions.append(tname)
-                    input_connected_flags.append(str(input_conn).strip().upper() == "Y")
-                    output_connected_flags.append(str(output_conn).strip().upper() == "Y")
-                    symbol_bottoms.append(capsule_y_center - SYMBOL_HEIGHT / 2 - SYMBOL_RADIUS)
-                    current_x += pin_spacing
-                    current_row_max_x = max(current_row_max_x, current_x)
-                    current_terminal_count += 1
+                if symbol == 'choke':
                     i += 1
+                    continue  # Skip vertical symbol drawing; we'll handle horizontal later
                 elif symbol == 'dual_fuse':
                     ##
                     if i + 1 < len(group):
@@ -897,9 +1194,65 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
                         current_row_max_x = max(current_row_max_x, current_x)
                         current_terminal_count += 1
                         i += 1
+            # Add middle space
+            current_x += pin_spacing  # extra space after symbols
+            current_row_max_x = max(current_row_max_x, current_x)
+            # Add resistor if applicable
+            resistor_row = df_resistor[df_resistor['circuit_id'] == circuit_id]
+            special_resistor = False
+            if not resistor_row.empty and str(resistor_row['resistor'].iloc[0]).strip().lower() == 'yes':
+                special_resistor = True
+                resistor_label = str(resistor_row['resistor_name'].iloc[0]).strip() if 'resistor_name' in resistor_row.columns and pd.notna(resistor_row['resistor_name'].iloc[0]) else 'R'
+                input_terms = [term.strip() for term in str(resistor_row['input_terminal'].iloc[0]).strip().replace('.0', '').split(',') if term.strip()]
+                output_terms = [term.strip() for term in str(resistor_row['output_terminal'].iloc[0]).strip().replace('.0', '').split(',') if term.strip()]
+                input_x_pos = [x_positions[terminal_names_for_positions.index(term)] for term in input_terms if term in terminal_names_for_positions] if input_terms else None
+                output_x_pos = [x_positions[terminal_names_for_positions.index(term)] for term in output_terms if term in terminal_names_for_positions] if output_terms else None
+                symbols_to_add = 1
+                if current_terminal_count + symbols_to_add > max_terminal_symbols_per_row:
+                    row_index += 1
+                    overall_max_x = max(overall_max_x, current_row_max_x)
+                    current_row_max_x = start_x
+                    current_x = start_x
+                    current_terminal_count = 0
+                    y_offset -= vertical_gap
+                    capsule_y_center = CAPSULE_Y_CENTER_BASE + y_offset
+                    y_top_bus_group = capsule_y_center + y_top_bus_offset
+                    y_bottom_bus_group = capsule_y_center + y_bottom_bus_offset
+                    if row_index >= max_rows_visible:
+                        stop_drawing = True
+                        break
+                current_x -= 0.5
+                draw_resistor(ax, current_x, capsule_y_center, input_terminal=','.join(input_terms) if input_terms else '', output_terminal=','.join(output_terms) if output_terms else '', resistor_name=resistor_label, input_x_pos=input_x_pos, output_x_pos=output_x_pos)
+                current_x += pin_spacing
+                current_row_max_x = max(current_row_max_x, current_x)
+                current_terminal_count += 1
+
+
             # If we reserved a blank 4th row mid-way, skip the rest
             if stop_drawing:
                 break
+
+            # Draw horizontal choke on bottom bus if specified in choketable
+            choke_row = df_choke[df_choke['circuit_id'] == circuit_id]
+            special_choke = False
+            vert_x = None
+            if not choke_row.empty and str(choke_row['choke'].iloc[0]).strip().lower() == 'yes':
+                input_term = str(choke_row['input_terminal'].iloc[0]).strip().replace('.0', '')
+                output_term = str(choke_row['output_terminal'].iloc[0]).strip().replace('.0', '')
+                if input_term in terminal_names_for_positions:
+                    start_idx = terminal_names_for_positions.index(input_term)
+                    x_left = x_positions[start_idx]
+                    choke_label = str(choke_row['terminal_name'].iloc[0]).strip() if 'terminal_name' in choke_row.columns and pd.notna(choke_row['terminal_name'].iloc[0]) else 'CHOKE'
+                    if output_term in terminal_names_for_positions:
+                        end_idx = terminal_names_for_positions.index(output_term)
+                        x_right = x_positions[end_idx]
+                        box_width = max(1.2, x_right - x_left - 0.2)
+                        draw_horizontal_choke(ax, (x_left + x_right) / 2, y_bottom_bus_group, label=choke_label, box_width=box_width)
+                    else:
+                        special_choke = True
+                        box_width = 1.2
+                        x_center = x_left + 0.8
+                        vert_x = draw_horizontal_choke(ax, x_center, y_bottom_bus_group, label=choke_label, box_width=box_width, special_end=True, output_label=output_term)
 
             hook_input_flags = []
             hook_output_flags = []
@@ -964,8 +1317,12 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
                 if connected_local:
                     last_local = connected_local[-1]
                     x_last = sub_x[last_local]
-                    ax.plot([x_last, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group], color='black', linewidth=1)
-                    ax.plot([x_last + 0.3, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group - 0.2], color='black', linewidth=1)
+                    if (special_choke and max_idx == start_idx and min_idx <= start_idx) or special_resistor:
+                        # skip standard hook for special choke or resistor
+                        pass
+                    else:
+                        ax.plot([x_last, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group], color='black', linewidth=1)
+                        ax.plot([x_last + 0.3, x_last + 0.3], [y_bottom_bus_group, y_bottom_bus_group - 0.2], color='black', linewidth=1)
 
             circuit_groups = df_group[df_group['circuit_id'] == circuit_id] if 'circuit_id' in df_group.columns else pd.DataFrame()
             name_to_x = {}
@@ -1006,6 +1363,8 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
                         ax.text(center_x, y_top_bus_group + 0.2, str(label_text), ha='center', va='bottom', fontsize=8, fontweight='bold')
 
             circuit_headers = df_header[df_header['circuit_id'] == circuit_id]
+            relay_top = {}
+            relay_bottom = {}
             for _, hrow in circuit_headers.iterrows():
                 header_type = str(hrow.get('header_type', '')).strip().upper()
                 terminal_start = hrow.get('terminal_start')
@@ -1020,30 +1379,36 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
                 end_name = str(terminal_end).strip().replace('.0', '') if pd.notna(terminal_end) else None
                 if pd.isna(start_name) or pd.isna(end_name) or start_name not in terminal_names_for_positions or end_name not in terminal_names_for_positions:
                     continue
-                start_idx = terminal_names_for_positions.index(start_name)
-                end_idx = terminal_names_for_positions.index(end_name)
-                if start_idx > end_idx:
-                    start_idx, end_idx = end_idx, start_idx
-                x_left = x_positions[start_idx]
-                x_right = x_positions[end_idx]
+                start_idx_temp = terminal_names_for_positions.index(start_name)
+                end_idx_temp = terminal_names_for_positions.index(end_name)
+                if start_idx_temp > end_idx_temp:
+                    start_idx_temp, end_idx_temp = end_idx_temp, start_idx_temp
+                x_left = x_positions[start_idx_temp]
+                x_right = x_positions[end_idx_temp]
 
                 if header_type == 'RELAY':
+                    terminal_start_str = str(terminal_start).strip().replace('.0', '') if pd.notna(terminal_start) else None
+                    terminal_end_str = str(terminal_end).strip().replace('.0', '') if pd.notna(terminal_end) else None
+                    if terminal_start_str is None or terminal_end_str is None:
+                        continue
+                    key = (circuit_id, terminal_start_str, terminal_end_str)
+                    text = str(hrow.get('text', '')).strip()
+                    input_output = str(hrow.get('input_output', '')).strip().lower()
                     if input_output == 'input':
-                        symbol_top_y = capsule_y_center + SYMBOL_HEIGHT/2 + SYMBOL_RADIUS
-                        input_conn_flag = any(name_to_input_connected.get(str(term).strip().replace('.0', ''), False) for term in [terminal_start, terminal_end])
-                        vertical_line_start = y_top_bus_group if input_conn_flag else symbol_top_y + stub_length
-                        draw_group_top_symbol(ax, x_left, x_right, vertical_line_start, text=text, input_connected='Y' if input_conn_flag else 'N')
+                        if key not in relay_top:
+                            relay_top[key] = []
+                        relay_top[key].append(text)
                     elif input_output == 'output':
-                        symbol_bottom_y = capsule_y_center - SYMBOL_HEIGHT/2 - SYMBOL_RADIUS
-                        output_conn_flag = any(name_to_output_connected.get(str(term).strip().replace('.0', ''), False) for term in [terminal_start, terminal_end])
-                        vertical_line_end = y_bottom_bus_group if output_conn_flag else symbol_bottom_y - stub_length
-                        draw_group_bottom_symbol(ax, x_left, x_right, vertical_line_end, text=text, output_connected='Y' if output_conn_flag else 'N')
+                        if key not in relay_bottom:
+                            relay_bottom[key] = []
+                        relay_bottom[key].append(text)
+                    continue
                 elif header_type in ['WIREFROM', 'WIRETO']:
-                    min_symbol_bottom_local = min(symbol_bottoms[start_idx:end_idx+1]) if symbol_bottoms else None
+                    min_symbol_bottom_local = min(symbol_bottoms[start_idx_temp:end_idx_temp+1]) if symbol_bottoms else None
                     if header_type == 'WIREFROM':
-                        sub_flags = input_connected_flags[start_idx:end_idx+1]
+                        sub_flags = input_connected_flags[start_idx_temp:end_idx_temp+1]
                         connected_local = [i for i, f in enumerate(sub_flags) if f]
-                        first_hook_x_specific = x_positions[start_idx + connected_local[0]] if connected_local else x_left
+                        first_hook_x_specific = x_positions[start_idx_temp + connected_local[0]] if connected_local else x_left
                         draw_header(ax, circuit_id, header_type, x_left, x_right, text,
                                     min_symbol_bottom=min_symbol_bottom_local,
                                     first_hook_x=first_hook_x_specific,
@@ -1051,15 +1416,63 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
                                     y_top_bus_group=y_top_bus_group,
                                     y_bottom_bus_group=y_bottom_bus_group)
                     elif header_type == 'WIRETO':
-                        sub_flags = output_connected_flags[start_idx:end_idx+1]
+                        sub_flags = output_connected_flags[start_idx_temp:end_idx_temp+1]
                         connected_local = [i for i, f in enumerate(sub_flags) if f]
-                        last_hook_x_specific = x_positions[start_idx + connected_local[-1]] if connected_local else x_right
+                        last_hook_x_specific = x_positions[start_idx_temp + connected_local[-1]] if connected_local else None
+                        special_ha_local = False
+                        if special_choke and end_idx_temp == start_idx:
+                            last_hook_x_specific = vert_x
+                            special_ha_local = True
                         draw_header(ax, circuit_id, header_type, x_left, x_right, text,
                                     min_symbol_bottom=min_symbol_bottom_local,
                                     first_hook_x=None,
                                     last_hook_x=last_hook_x_specific,
                                     y_top_bus_group=y_top_bus_group,
-                                    y_bottom_bus_group=y_bottom_bus_group)
+                                    y_bottom_bus_group=y_bottom_bus_group,
+                                    special_ha=special_ha_local)
+            for key, texts in relay_top.items():
+                if not texts:
+                    continue
+                cid, start_name, end_name = key
+                if start_name not in terminal_names_for_positions or end_name not in terminal_names_for_positions:
+                    continue
+                start_idx_temp = terminal_names_for_positions.index(start_name)
+                end_idx_temp = terminal_names_for_positions.index(end_name)
+                if start_idx_temp > end_idx_temp:
+                    start_idx_temp, end_idx_temp = end_idx_temp, start_idx_temp
+                x_left = x_positions[start_idx_temp]
+                x_right = x_positions[end_idx_temp]
+                symbol_top_y = capsule_y_center + SYMBOL_HEIGHT/2 + SYMBOL_RADIUS
+                input_conn_flag = any(name_to_input_connected.get(term, False) for term in terminal_names_for_positions[start_idx_temp:end_idx_temp+1])
+                vertical_line_start = y_top_bus_group if input_conn_flag else symbol_top_y + stub_length
+                draw_group_top_symbol(ax, x_left, x_right, vertical_line_start, texts=texts, scale=1.0, input_connected='Y' if input_conn_flag else 'N')
+
+            for key, texts in relay_bottom.items():
+                if not texts:
+                    continue
+                cid, start_name, end_name = key
+                if start_name not in terminal_names_for_positions or end_name not in terminal_names_for_positions:
+                    continue
+                start_idx_temp = terminal_names_for_positions.index(start_name)
+                end_idx_temp = terminal_names_for_positions.index(end_name)
+                if start_idx_temp > end_idx_temp:
+                    start_idx_temp, end_idx_temp = end_idx_temp, start_idx_temp
+                x_left = x_positions[start_idx_temp]
+                x_right = x_positions[end_idx_temp]
+                symbol_bottom_y = capsule_y_center - SYMBOL_HEIGHT/2 - SYMBOL_RADIUS
+                output_conn_flag = any(name_to_output_connected.get(term, False) for term in terminal_names_for_positions[start_idx_temp:end_idx_temp+1])
+                vertical_line_end = y_bottom_bus_group if output_conn_flag else symbol_bottom_y - stub_length
+                choke_output_terminal = None
+                choke_info = df_choke[df_choke['circuit_id'] == cid]
+                if not choke_info.empty:
+                    output_terminal = str(choke_info['output_terminal'].iloc[0]).strip()
+                    if output_terminal.endswith('.0'):
+                        output_terminal = output_terminal[:-2]
+                    if output_terminal in [start_name, end_name]:
+                        choke_output_terminal = output_terminal
+                draw_group_bottom_symbol(ax, x_left, x_right, vertical_line_end, text=texts[0], 
+                                        output_connected='Y' if output_conn_flag else 'N', 
+                                        choke_output_terminal=choke_output_terminal)
 
             all_x_positions.extend(x_positions)
             all_input_connected_flags.extend(input_connected_flags)
@@ -1092,9 +1505,15 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
     # Calculate page center for junction box using fixed horizontal span
     page_center_x = (left + right) / 2.0
 
-    # Add top/bottom margins for vertical limits (keep previous min_y/max_y logic)
     ax.set_xlim(left, right)
     ax.set_ylim(fixed_ylim_min, fixed_ylim_max)
+
+    # Draw manual horizontal line with fixed absolute coordinates
+    manual_y = -12.65
+    ax.plot([left - 2, right + 2], [manual_y, manual_y], 'k-', linewidth=2.0, zorder=10)
+
+
+
 
     # draw junction box at top using the computed page_center_x
     junction_box_y = CAPSULE_Y_CENTER_BASE + y_top_bus_offset +1.8 + 3.0 -1.0
@@ -1103,7 +1522,7 @@ def draw_symbols(df_symbols, ax, ordered_circuit_ids, junction_name, start_x=1, 
     return all_x_positions, all_input_connected_flags, all_output_connected_flags
 
 # === Function to draw footer ===
-def draw_footer(ax, left, right, fixed_ylim_min, total_pages, page_num, df_title_row):
+def draw_footer(ax, left, right, fixed_ylim_min, total_pages, page_num, df_title_row, junction_name):
     """
     Draw a compact footer (title-block style) on `ax` occupying the right 50% of [left, right].
     All line widths are set to 1.3 and all text font sizes are set to 20 (as requested).
@@ -1118,7 +1537,7 @@ def draw_footer(ax, left, right, fixed_ylim_min, total_pages, page_num, df_title
 
     # Footer occupies right 50% at bottom
     footer_width = (right - left) / 2.0
-    footer_x_start = (left + right) / 2.0
+    footer_x_start = left + footer_width
     footer_y_start = fixed_ylim_min
     base_height = 3.0  # original design height
     scale = height / base_height  # 1.5 / 3.0 = 0.5
@@ -1197,11 +1616,11 @@ def draw_footer(ax, left, right, fixed_ylim_min, total_pages, page_num, df_title
     ax.text(footer_x_start + 15 * x_scale, footer_y_start + s(1.82),
             str(df_title_row.get('designation3', '')), va='top', ha='left', fontsize=FONTSIZE, weight='bold')
 
-    # Station info
+    # Station info - Use junction_name instead of diagram_name
     ax.text(footer_x_start + 19 * x_scale, footer_y_start + s(2.75),
             str(df_title_row.get('station_name', '')), va='top', ha='left', fontsize=FONTSIZE, weight='bold')
     ax.text(footer_x_start + 18 * x_scale, footer_y_start + s(2.0),
-            str(df_title_row.get('diagram_name', '')), va='top', ha='left', fontsize=FONTSIZE, weight='bold')
+            junction_name, va='top', ha='left', fontsize=FONTSIZE, weight='bold')  # Changed to use junction_name
     ax.text(footer_x_start + 18.5 * x_scale, footer_y_start + s(0.9),
             f"DRG. NO. {df_title_row.get('station_code', '')}", va='top', ha='left', fontsize=FONTSIZE, weight='bold')
 
@@ -1257,14 +1676,15 @@ for junction in junction_names:
 
 pin_spacing = 0.8
 
-# Compute max_row_width for each junction to determine page size for JB-20(F)
+# Compute max_row_width for each junction to determine page size for RAILWAYPROJECT
 # Modified to account for terminal symbols
 junction_row_widths = {}
 for junction in junction_names:
     current_x_pre = 1
     current_row_max_x_pre = 1
-    max_row_width = 0
     current_terminal_count_pre = 0
+    current_letter = None
+    max_row_width = 0
     junction_mask = df_circuit['junction_name'].astype(str).str.strip() == junction
     junction_circuits = df_circuit[junction_mask].copy()
     if 'letter_order' in junction_circuits.columns and 'position' in junction_circuits.columns:
@@ -1272,30 +1692,42 @@ for junction in junction_names:
     elif 'position' in junction_circuits.columns:
         junction_circuits = junction_circuits.sort_values(['position'], na_position='last')
     circuit_list = junction_circuits['circuit_id'].tolist()
-
     for circuit_id_pre in circuit_list:
+        r = df_circuit[df_circuit['circuit_id'] == circuit_id_pre]
+        letter = r['circuit_letter'].iloc[0] if not r.empty and 'circuit_letter' in r.columns else ""
+        if letter != current_letter and current_terminal_count_pre > 0:
+            max_row_width = max(max_row_width, current_row_max_x_pre - 1)
+            current_row_max_x_pre = 1
+            current_x_pre = 1
+            current_terminal_count_pre = 0
+        current_letter = letter
         group_pre = df_symbols[df_symbols['circuit_id'] == circuit_id_pre].sort_index().reset_index(drop=True)
         total_terminals = 0
+        added_width = 0
         i = 0
         while i < len(group_pre):
             symbol = str(group_pre.iloc[i].get('symbol', '')).strip().lower()
-            if symbol == 'dual_fuse' and i + 1 < len(group_pre):
-                total_terminals += 2
-                i += 2
+            if symbol == 'dual_fuse':
+                if i + 1 < len(group_pre):
+                    added_width += pin_spacing * 1.0 + pin_spacing * 1.5
+                    total_terminals += 2
+                    i += 2
+                else:
+                    added_width += pin_spacing
+                    total_terminals += 1
+                    i += 1
             else:
+                added_width += pin_spacing
                 total_terminals += 1
                 i += 1
-
         if current_terminal_count_pre + total_terminals > 36:
             max_row_width = max(max_row_width, current_row_max_x_pre - 1)
             current_row_max_x_pre = 1
             current_x_pre = 1
             current_terminal_count_pre = 0
-
-        current_x_pre += total_terminals * pin_spacing + CIRCUIT_GAP
+        current_x_pre += added_width + CIRCUIT_GAP
         current_row_max_x_pre = max(current_row_max_x_pre, current_x_pre)
         current_terminal_count_pre += total_terminals
-
     max_row_width = max(max_row_width, current_row_max_x_pre - 1)
     junction_row_widths[junction] = max_row_width
 
@@ -1314,8 +1746,8 @@ elif 'position' in junction_circuits.columns:
 jb20f_circuit_ids = junction_circuits['circuit_id'].tolist()
 num_circuits = len(jb20f_circuit_ids)
 num_rows = max_rows_visible  # Since we split, but for height, assume max
-fixed_fig_width = global_max_width
-fixed_fig_height = max(3, num_rows * 9.0) + footer_inch_add  # Add space for footer
+fixed_fig_width = 42.8
+fixed_fig_height = 31.0
 
 bottom_margin = 1.0
 top_margin = 3.0
@@ -1403,13 +1835,58 @@ output_file = 'Terminal_Symbols_Centered_Fixed_Size.pdf'
 with PdfPages(output_file) as pdf:
     for page_num, (junction_name, page_circuit_ids) in enumerate(pages, 1):
         # Use fixed dimensions from JB-20(F) first page
+        # per-page computation
+        page_max_width = 0
+        current_x_page = 1
+        current_row_max_x_page = 1
+        current_terminal_count_page = 0
+        current_letter = None
+        for cid in page_circuit_ids:
+            r = df_circuit[df_circuit['circuit_id'] == cid]
+            letter = r['circuit_letter'].iloc[0] if not r.empty and 'circuit_letter' in r.columns else ""
+            if letter != current_letter and current_terminal_count_page > 0:
+                page_max_width = max(page_max_width, current_row_max_x_page - 1)
+                current_row_max_x_page = 1
+                current_x_page = 1
+                current_terminal_count_page = 0
+            current_letter = letter
+            group = df_symbols[df_symbols['circuit_id'] == cid].sort_index().reset_index(drop=True)
+            total_terminals = 0
+            added_width = 0
+            i = 0
+            while i < len(group):
+                symbol = str(group.iloc[i].get('symbol', '')).strip().lower()
+                if symbol == 'dual_fuse':
+                    if i + 1 < len(group):
+                        added_width += pin_spacing * 1.0 + pin_spacing * 1.5
+                        total_terminals += 2
+                        i += 2
+                    else:
+                        added_width += pin_spacing
+                        total_terminals += 1
+                        i += 1
+                else:
+                    added_width += pin_spacing
+                    total_terminals += 1
+                    i += 1
+            if current_terminal_count_page + total_terminals > 36:
+                page_max_width = max(page_max_width, current_row_max_x_page - 1)
+                current_row_max_x_page = 1
+                current_x_page = 1
+                current_terminal_count_page = 0
+            current_x_page += added_width + CIRCUIT_GAP
+            current_row_max_x_page = max(current_row_max_x_page, current_x_page)
+            current_terminal_count_page += total_terminals
+        page_max_width = max(page_max_width, current_row_max_x_page - 1)
+        shift = (global_max_width - (page_max_width + 1.2)) / 2
+        page_start_x = 1 + shift
         fig, ax = plt.subplots(figsize=(fixed_fig_width, fixed_fig_height))
         ax.set_facecolor('white')
         ax.axis('off')
 
         x_positions, input_connected_flags, output_connected_flags = draw_symbols(
             df_symbols, ax, page_circuit_ids, junction_name,
-            start_x=1, pin_spacing=pin_spacing,
+            start_x=page_start_x, pin_spacing=pin_spacing,
             circuits_per_page=len(page_circuit_ids),
             page_number=page_num,
             max_terminal_symbols_per_row=36,
@@ -1418,9 +1895,9 @@ with PdfPages(output_file) as pdf:
         )
 
         # Draw footer on bottom right half
-        left = 1 - 1.5  # From draw_symbols logic
+        left = page_start_x - 1.5  # From draw_symbols logic
         right = left + global_max_width
-        draw_footer(ax, left, right, fixed_ylim_min, total_pages, page_num, title_row)
+        draw_footer(ax, left, right, fixed_ylim_min, total_pages, page_num, title_row, junction_name)
 
         fig.subplots_adjust(left=0.04, right=0.99, top=0.98, bottom=0.02)
         pdf.savefig(fig, dpi=300, facecolor='white')
